@@ -2,7 +2,8 @@
 
 A docker image builder for habitat
 
-    "You know what the trouble is, Brucey? We used to make shit in this country, build shit. Now we just put our hand in the next guy's pocket."
+    "You know what the trouble is, Brucey? We used to make shit in this country, build shit. 
+    Now we just put our hand in the next guy's pocket."
     ―Frank Sobotka
 
 ## Usage
