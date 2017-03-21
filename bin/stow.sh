@@ -179,7 +179,7 @@ build_docker_image() {
   DOCKER_RUN_TAG="${DOCKER_REGISTRY_URL}${pkg_ident}"
 
   HAB_VERSION=$(hab --version | awk '{print $2}' | cut -d/ -f1)
-  DOCKER_HAB_TAG="${pkg_origin}/habitat_base:${HAB_VERSION}"
+  DOCKER_HAB_TAG="${DOCKER_REGISTRY_URL}core/habitat_base:${HAB_VERSION}"
 
   # create hab base layer image
   DOCKER_CONTEXT="$($_mktemp_cmd -t -d "${program}-XXXX")"
