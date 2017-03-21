@@ -1,14 +1,14 @@
-pkg_name=hab-pkg-dockerize
-pkg_origin=core
-pkg_version=$(cat "$PLAN_CONTEXT/../../VERSION")
-pkg_maintainer="The Habitat Maintainers <humans@habitat.sh>"
-pkg_license=('Apache-2.0')
+pkg_name=stevedore
+pkg_origin=chetan
+pkg_version=0.1
+pkg_maintainer="Chetan Sarva <chetan@pixelcop.net>"
+pkg_license=('MIT')
 pkg_source=nosuchfile.tar.gz
 pkg_deps=(core/coreutils core/findutils core/gawk core/grep core/bash core/docker core/hab core/hab-studio)
 pkg_build_deps=()
 pkg_bin_dirs=(bin)
 
-program=$pkg_name
+program="stow"
 
 do_build() {
   cp -v $PLAN_CONTEXT/bin/${program}.sh ${program}
