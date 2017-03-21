@@ -3,7 +3,7 @@
 # # Usage
 #
 # ```
-# $ hab-pkg-dockerize [--repo <repo>] [--push] <PKG_IDENT>
+# $ stow [--repo <repo>] [--push] <PKG_IDENT>
 # ```
 #
 # # Synopsis
@@ -107,11 +107,12 @@ EXAMPLE:
 
     Would create and push the following images/tags:
 
-    docker.private.com:443/core/nginx                     1.10.1-20161207041036   380c892f61ab        2 minutes ago       183.7 MB
-    docker.private.com:443/core/nginx                     latest                  380c892f61ab        2 minutes ago       183.7 MB
-    docker.private.com:443/core/habitat_export_base       43691665acf57304        e965f9e803c4        13 hours ago        181.9 MB
-    docker.private.com:443/core/nginx_base                43691665acf57304        e965f9e803c4        13 hours ago        181.9 MB
-
+    REPOSITORY                                      TAG                      IMAGE ID            CREATED             SIZE
+    docker.private.com:443/core/nginx               1.11.10-20170215235242   13bd9e6efbe1        20 seconds ago      177 MB
+    docker.private.com:443/core/nginx               latest                   13bd9e6efbe1        20 seconds ago      177 MB
+    docker.private.com:443/core/habitat_deps_base   a8f6b4a21c68f76b         e3c0f2acd8bd        27 seconds ago      174 MB
+    docker.private.com:443/core/nginx_base          a8f6b4a21c68f76b         e3c0f2acd8bd        27 seconds ago      174 MB
+    core/habitat_base                               0.19.0                   3310f705d8cf        6 minutes ago       161 MB
 "
 }
 
@@ -174,17 +175,25 @@ build_docker_image() {
 
   BASE_PKGS=$(base_pkgs $PKG)
   DOCKER_BASE_TAG="${DOCKER_REGISTRY_URL}${pkg_ident}_base:$(base_pkg_hash $BASE_PKGS)"
-  DOCKER_BASE_TAG_ALT="${DOCKER_REGISTRY_URL}${pkg_origin}/habitat_export_base:$(base_pkg_hash $BASE_PKGS)"
+  DOCKER_BASE_TAG_ALT="${DOCKER_REGISTRY_URL}${pkg_origin}/habitat_deps_base:$(base_pkg_hash $BASE_PKGS)"
+  DOCKER_RUN_TAG="${DOCKER_REGISTRY_URL}${pkg_ident}"
 
-  # create base layer image
+  HAB_VERSION=$(hab --version | awk '{print $2}' | cut -d/ -f1)
+  DOCKER_HAB_TAG="${pkg_origin}/habitat_base:${HAB_VERSION}"
+
+  # create hab base layer image
+  DOCKER_CONTEXT="$($_mktemp_cmd -t -d "${program}-XXXX")"
+  pushd $DOCKER_CONTEXT > /dev/null
+  docker_hab_image $PKG
+  popd > /dev/null
+  rm -rf "$DOCKER_CONTEXT"
+
+  # create app base layer image
   DOCKER_CONTEXT="$($_mktemp_cmd -t -d "${program}-XXXX")"
   pushd $DOCKER_CONTEXT > /dev/null
   docker_base_image $PKG
   popd > /dev/null
   rm -rf "$DOCKER_CONTEXT"
-
-
-  DOCKER_RUN_TAG="${DOCKER_REGISTRY_URL}${pkg_ident}"
 
   # build runtime image
   DOCKER_CONTEXT="$($_mktemp_cmd -t -d "${program}-XXXX")"
@@ -236,27 +245,24 @@ base_pkg_hash() {
   echo "$@" | sha256sum | cut -b1-16
 }
 
-docker_base_image() {
+# Test if the given tag already exists
+docker_image_exists() {
+  if [[ -n "$(docker images -q $1 2> /dev/null)" ]]; then
+    return 0
+  fi
+  return 1
+}
 
-  if [[ -n "$(docker images -q $DOCKER_BASE_TAG 2> /dev/null)" ]]; then
-    # image already exists
-    echo ">> base docker image: $DOCKER_BASE_TAG already built; skipping rebuild"
-    return 0;
+docker_hab_image() {
+  local _l=">> hab base image (hab only)"
+  if docker_image_exists $DOCKER_HAB_TAG; then
+    echo "$_l: $DOCKER_HAB_TAG already built; skipping rebuild"
+    return 0
   fi
 
-  if [[ -n "$(docker images -q $DOCKER_BASE_TAG_ALT 2> /dev/null)" ]]; then
-    # image already exists
-    echo ">> base docker image: $DOCKER_BASE_TAG_ALT already built; skipping rebuild"
-    # create a tag alias for our package
-    docker tag $DOCKER_BASE_TAG_ALT $DOCKER_BASE_TAG
-    DOCKER_BASE_TAG="$DOCKER_BASE_TAG_ALT"
-    return 0;
-  fi
+  echo "$_l: building..."
 
-  echo ">> base docker image: building..."
-
-  env PKGS="$BASE_PKGS" NO_MOUNT=1 hab-studio -r $DOCKER_CONTEXT/rootfs -t baseimage new
-  echo "$1" > $DOCKER_CONTEXT/rootfs/.hab_pkg
+  env PKGS="" NO_MOUNT=1 hab-studio -r $DOCKER_CONTEXT/rootfs -t baseimage new
 
   # create base image Dockerfile
   cat <<EOT > $DOCKER_CONTEXT/Dockerfile
@@ -266,17 +272,66 @@ WORKDIR /
 ADD rootfs /
 EOT
 
-  docker build --force-rm --no-cache -t $DOCKER_BASE_TAG .
+  if [ -n "${DEBUG:-}" ]; then
+    cat $DOCKER_CONTEXT/Dockerfile
+  fi
+
+  docker build --force-rm --no-cache -t $DOCKER_HAB_TAG .
+
+  echo "$_l: built $DOCKER_HAB_TAG"
+}
+
+docker_base_image() {
+  local _l=">> app deps image"
+  if docker_image_exists $DOCKER_BASE_TAG; then
+    echo "$_l: $DOCKER_BASE_TAG already built; skipping rebuild"
+    return 0;
+  fi
+
+  if docker_image_exists $DOCKER_BASE_TAG_ALT; then
+    echo "$_l: $DOCKER_BASE_TAG_ALT already built; skipping rebuild"
+    # create a tag alias for our package
+    docker tag $DOCKER_BASE_TAG_ALT $DOCKER_BASE_TAG
+    DOCKER_BASE_TAG="$DOCKER_BASE_TAG_ALT"
+    return 0;
+  fi
+
+  echo "$_l: building..."
+
+  mv /hab/cache/artifacts/* $DOCKER_CONTEXT/
+  mkdir -p $DOCKER_CONTEXT/keys && cp -a /hab/cache/keys/* $DOCKER_CONTEXT/keys/
+  local _base_pkgs=$(echo $BASE_PKGS | tr '\n' ' ')
+
+  # create base image Dockerfile
+  cat <<EOT > $DOCKER_CONTEXT/Dockerfile
+FROM ${DOCKER_HAB_TAG}
+
+COPY *.hart /hab/cache/artifacts/
+COPY keys/* /hab/cache/keys/
+
+RUN hab pkg install $_base_pkgs \
+    && rm -f /hab/cache/artifacts/* \
+    && rm -f /hab/cache/keys/*.key
+EOT
+
+  if [ -n "${DEBUG:-}" ]; then
+    cat $DOCKER_CONTEXT/Dockerfile
+  fi
+
+  docker build --force-rm --no-cache --squash -t $DOCKER_BASE_TAG .
   docker tag $DOCKER_BASE_TAG $DOCKER_BASE_TAG_ALT
 
-  echo ">> base docker image: built $DOCKER_BASE_TAG and $DOCKER_BASE_TAG_ALT"
+  # cleanup
+  mv $DOCKER_CONTEXT/*.hart /hab/cache/artifacts/
+
+  echo "$_l: built $DOCKER_BASE_TAG and $DOCKER_BASE_TAG_ALT"
 }
 
 docker_image() {
-  echo ">> docker image: building..."
+  echo ">> app image: building..."
 
   local pkg_file=$(ls /hab/cache/artifacts/$(cat $(hab pkg path $pkg_ident)/IDENT | tr '/' '-')-*)
-  cp -a $pkg_file $DOCKER_CONTEXT/
+  mv $pkg_file $DOCKER_CONTEXT/
   # make sure all local keys are available during docker build
   mkdir -p $DOCKER_CONTEXT/keys && cp -a /hab/cache/keys/* $DOCKER_CONTEXT/keys/
   pkg_file=$(basename $pkg_file)
@@ -289,6 +344,8 @@ COPY keys/* /hab/cache/keys/
 
 RUN hab pkg install /tmp/${pkg_file} \
     && rm -f /tmp/${pkg_file} \
+    && rm -f /hab/cache/artifacts/* \
+    && echo "$pkg_ident" > /.hab_pkg \
     && mkdir -p $HAB_ROOT_PATH/svc/${pkg_name}/data \
                 $HAB_ROOT_PATH/svc/${pkg_name}/config \
     && chown -R 42:42 $HAB_ROOT_PATH/svc/${pkg_name} \
@@ -300,10 +357,13 @@ ENTRYPOINT ["/init.sh"]
 CMD ["start", "$1"]
 EOT
 
-  docker build --force-rm --no-cache -t "${DOCKER_RUN_TAG}:${pkg_version}" .
+  docker build --force-rm --no-cache --squash -t "${DOCKER_RUN_TAG}:${pkg_version}" .
   docker tag "${DOCKER_RUN_TAG}:${pkg_version}" "${DOCKER_RUN_TAG}:latest"
 
-  echo ">> docker image: built ${DOCKER_RUN_TAG}:${pkg_version} and ${DOCKER_RUN_TAG}:latest"
+  # cleanup
+  mv $DOCKER_CONTEXT/*.hart /hab/cache/artifacts/
+
+  echo ">> app image: built ${DOCKER_RUN_TAG}:${pkg_version} and ${DOCKER_RUN_TAG}:latest"
 }
 
 # Push the built docker images to the configured registry
