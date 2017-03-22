@@ -66,6 +66,10 @@ parse_options() {
         fi
         shift
         ;;
+      --slim)
+        DOCKER_SLIM="1"
+        shift
+        ;;
       *)
         PKG="$1"
         break
@@ -134,10 +138,10 @@ exit_with() {
 }
 
 find_system_commands() {
-  if $(mktemp --version 2>&1 | grep -q 'GNU coreutils'); then
+  if mktemp --version 2>&1 | grep -q 'GNU coreutils'; then
     _mktemp_cmd=$(command -v mktemp)
   else
-    if $(/bin/mktemp --version 2>&1 | grep -q 'GNU coreutils'); then
+    if /bin/mktemp --version 2>&1 | grep -q 'GNU coreutils'; then
       _mktemp_cmd=/bin/mktemp
     else
       exit_with "We require GNU mktemp to build docker images; aborting" 1
@@ -180,6 +184,19 @@ build_docker_image() {
 
   HAB_VERSION=$(hab --version | awk '{print $2}' | cut -d/ -f1)
   DOCKER_HAB_TAG="${DOCKER_REGISTRY_URL}core/habitat_base:${HAB_VERSION}"
+
+  if [[ "$DOCKER_SLIM" == "1" ]]; then
+    SLIM_DOCKERFILE=$(cat <<'EOF'
+    ls /hab/pkgs/core > /tmp/.slim_shady_deps \
+    && hab pkg install chetan/slimshady \
+    && hab pkg exec chetan/slimshady slimshady \
+    && hab pkg exec chetan/slimshady slimshady --uninstall \
+    && rm -rf /hab/pkgs/chetan/slimshady /tmp/.slim_shady_deps
+EOF
+)
+  else
+    SLIM_DOCKERFILE="true"
+  fi
 
   # create hab base layer image
   DOCKER_CONTEXT="$($_mktemp_cmd -t -d "${program}-XXXX")"
@@ -270,13 +287,15 @@ FROM scratch
 ENV $(cat $DOCKER_CONTEXT/rootfs/init.sh | grep PATH= | cut -d' ' -f2-)
 WORKDIR /
 ADD rootfs /
+RUN $SLIM_DOCKERFILE
+RUN rm -f /hab/cache/artifacts/*
 EOT
 
   if [ -n "${DEBUG:-}" ]; then
     cat $DOCKER_CONTEXT/Dockerfile
   fi
 
-  docker build --force-rm --no-cache -t $DOCKER_HAB_TAG .
+  docker build --force-rm --no-cache --squash -t $DOCKER_HAB_TAG .
 
   echo "$_l: built $DOCKER_HAB_TAG"
 }
@@ -310,6 +329,7 @@ COPY *.hart /hab/cache/artifacts/
 COPY keys/* /hab/cache/keys/
 
 RUN hab pkg install $_base_pkgs \
+    $SLIM_DOCKERFILE \
     && rm -f /hab/cache/artifacts/* \
     && rm -f /hab/cache/keys/*.key
 EOT
@@ -344,6 +364,7 @@ COPY keys/* /hab/cache/keys/
 
 RUN hab pkg install /tmp/${pkg_file} \
     && rm -f /tmp/${pkg_file} \
+    && $SLIM_DOCKERFILE \
     && rm -f /hab/cache/artifacts/* \
     && echo "$pkg_ident" > /.hab_pkg \
     && mkdir -p $HAB_ROOT_PATH/svc/${pkg_name}/data \
@@ -356,6 +377,10 @@ EXPOSE 9631 $(package_exposes $1)
 ENTRYPOINT ["/init.sh"]
 CMD ["start", "$1"]
 EOT
+
+  if [ -n "${DEBUG:-}" ]; then
+    cat $DOCKER_CONTEXT/Dockerfile
+  fi
 
   docker build --force-rm --no-cache --squash -t "${DOCKER_RUN_TAG}:${pkg_version}" .
   docker tag "${DOCKER_RUN_TAG}:${pkg_version}" "${DOCKER_RUN_TAG}:latest"
@@ -399,6 +424,9 @@ push_docker_image() {
 
 # Controls whether or not we push to the configured registry
 : ${DOCKER_PUSH:="0"}
+
+# Controls whether or not to slim the image(s)
+: ${DOCKER_SLIM:="0"}
 
 # The package to dockerize
 : ${PKG:="unknown"}
