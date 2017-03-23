@@ -172,20 +172,16 @@ build_docker_image() {
     DOCKER_REGISTRY_URL=$(add_trailing_slash "$DOCKER_REGISTRY_URL")
   fi
 
+  # get pkg info
   pkg_name=$(package_name_for $PKG)
   pkg_origin=$(package_origin_for $ident_file)
   pkg_ident=$(package_ident_for $ident_file)
   pkg_version=$(version_num_for $ident_file)
-
   BASE_PKGS=$(base_pkgs $PKG)
-  DOCKER_BASE_TAG="${DOCKER_REGISTRY_URL}${pkg_ident}_base:$(base_pkg_hash $BASE_PKGS)"
-  DOCKER_BASE_TAG_ALT="${DOCKER_REGISTRY_URL}${pkg_origin}/habitat_deps_base:$(base_pkg_hash $BASE_PKGS)"
-  DOCKER_RUN_TAG="${DOCKER_REGISTRY_URL}${pkg_ident}"
 
-  HAB_VERSION=$(hab --version | awk '{print $2}' | cut -d/ -f1)
-  DOCKER_HAB_TAG="${DOCKER_REGISTRY_URL}core/habitat_base:${HAB_VERSION}"
-
+  # slim setup
   if [[ "$DOCKER_SLIM" == "1" ]]; then
+    SLIM_TAG="-slim"
     SLIM_DOCKERFILE=$(cat <<'EOF'
     ls /hab/pkgs/core > /tmp/.slim_shady_deps \
     && hab pkg install chetan/slimshady \
@@ -195,8 +191,17 @@ build_docker_image() {
 EOF
 )
   else
+    SLIM_TAG=""
     SLIM_DOCKERFILE="true"
   fi
+
+  # set tags
+  DOCKER_BASE_TAG="${DOCKER_REGISTRY_URL}${pkg_ident}_base:$(base_pkg_hash $BASE_PKGS)${SLIM_TAG}"
+  DOCKER_BASE_TAG_ALT="${DOCKER_REGISTRY_URL}${pkg_origin}/habitat_deps_base:$(base_pkg_hash $BASE_PKGS)${SLIM_TAG}"
+  DOCKER_RUN_TAG="${DOCKER_REGISTRY_URL}${pkg_ident}"
+
+  HAB_VERSION=$(hab --version | awk '{print $2}' | cut -d/ -f1)
+  DOCKER_HAB_TAG="${DOCKER_REGISTRY_URL}core/habitat_base:${HAB_VERSION}${SLIM_TAG}"
 
   # create hab base layer image
   DOCKER_CONTEXT="$($_mktemp_cmd -t -d "${program}-XXXX")"
@@ -287,8 +292,8 @@ FROM scratch
 ENV $(cat $DOCKER_CONTEXT/rootfs/init.sh | grep PATH= | cut -d' ' -f2-)
 WORKDIR /
 ADD rootfs /
-RUN $SLIM_DOCKERFILE
-RUN rm -f /hab/cache/artifacts/*
+RUN $SLIM_DOCKERFILE \
+    && rm -f /hab/cache/artifacts/*
 EOT
 
   if [ -n "${DEBUG:-}" ]; then
@@ -329,7 +334,7 @@ COPY *.hart /hab/cache/artifacts/
 COPY keys/* /hab/cache/keys/
 
 RUN hab pkg install $_base_pkgs \
-    $SLIM_DOCKERFILE \
+    && $SLIM_DOCKERFILE \
     && rm -f /hab/cache/artifacts/* \
     && rm -f /hab/cache/keys/*.key
 EOT
