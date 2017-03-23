@@ -137,6 +137,19 @@ exit_with() {
   exit $2
 }
 
+cleanup_and_exit() {
+  code=$1
+  set +e
+  if [[ -n "$DOCKER_CONTEXT" && -d $DOCKER_CONTEXT ]]; then
+    if [[ -n "$(ls $DOCKER_CONTEXT/*.hart 2>/dev/null)" ]]; then
+      mv $DOCKER_CONTEXT/*.hart /hab/cache/artifacts/
+    fi
+    popd >/dev/null
+    rm -rf "$DOCKER_CONTEXT"
+  fi
+  exit $code
+}
+
 find_system_commands() {
   if mktemp --version 2>&1 | grep -q 'GNU coreutils'; then
     _mktemp_cmd=$(command -v mktemp)
@@ -446,5 +459,6 @@ program=$(basename $0)
 find_system_commands
 
 parse_options $@
+trap 'cleanup_and_exit $?' INT TERM HUP EXIT
 build_docker_image
 push_docker_image
