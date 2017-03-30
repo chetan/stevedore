@@ -209,13 +209,13 @@ EOF
   fi
 
   # set tags
-  DOCKER_BASE_HASH="$(base_pkg_hash $HABITAT_VERSION $BASE_PKGS)"
+  HAB_VERSION=$(hab --version | awk '{print $2}' | cut -d/ -f1)
+  DOCKER_HAB_TAG="${DOCKER_REGISTRY_URL}core/habitat_base:${HAB_VERSION}${SLIM_TAG}"
+  DOCKER_BASE_HASH="$(base_pkg_hash $HAB_VERSION $BASE_PKGS)"
   DOCKER_BASE_TAG="${DOCKER_REGISTRY_URL}${pkg_ident}_base:${DOCKER_BASE_HASH}${SLIM_TAG}"
   DOCKER_BASE_TAG_ALT="${DOCKER_REGISTRY_URL}${pkg_origin}/habitat_deps_base:${DOCKER_BASE_HASH}${SLIM_TAG}"
   DOCKER_RUN_TAG="${DOCKER_REGISTRY_URL}${pkg_ident}"
 
-  HAB_VERSION=$(hab --version | awk '{print $2}' | cut -d/ -f1)
-  DOCKER_HAB_TAG="${DOCKER_REGISTRY_URL}core/habitat_base:${HAB_VERSION}${SLIM_TAG}"
 
   # create hab base layer image
   DOCKER_CONTEXT="$($_mktemp_cmd -t -d "${program}-XXXX")"
