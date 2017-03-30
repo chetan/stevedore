@@ -346,7 +346,7 @@ docker_base_image() {
 
   echo "$_l: building..."
 
-  mv /hab/cache/artifacts/* $DOCKER_CONTEXT/
+  cp /hab/cache/artifacts/* $DOCKER_CONTEXT/
   mkdir -p $DOCKER_CONTEXT/keys && cp -a /hab/cache/keys/* $DOCKER_CONTEXT/keys/
   local _base_pkgs=$(echo -n $BASE_PKGS | tr '\n' ' ')
 
@@ -370,9 +370,6 @@ EOT
   docker build --force-rm --no-cache --squash -t $DOCKER_BASE_TAG .
   docker tag $DOCKER_BASE_TAG $DOCKER_BASE_TAG_ALT
 
-  # cleanup
-  mv $DOCKER_CONTEXT/*.hart /hab/cache/artifacts/
-
   echo "$_l: built $DOCKER_BASE_TAG and $DOCKER_BASE_TAG_ALT"
 }
 
@@ -380,7 +377,7 @@ docker_image() {
   echo ">> app image: building..."
 
   local pkg_file=$(ls /hab/cache/artifacts/$(cat $(hab pkg path $pkg_ident)/IDENT | tr '/' '-')-*)
-  mv $pkg_file $DOCKER_CONTEXT/
+  cp $pkg_file $DOCKER_CONTEXT/
   # make sure all local keys are available during docker build
   mkdir -p $DOCKER_CONTEXT/keys && cp -a /hab/cache/keys/* $DOCKER_CONTEXT/keys/
   pkg_file=$(basename $pkg_file)
@@ -413,9 +410,6 @@ EOT
 
   docker build --force-rm --no-cache --squash -t "${DOCKER_RUN_TAG}:${pkg_version}" .
   docker tag "${DOCKER_RUN_TAG}:${pkg_version}" "${DOCKER_RUN_TAG}:latest"
-
-  # cleanup
-  mv $DOCKER_CONTEXT/*.hart /hab/cache/artifacts/
 
   echo ">> app image: built ${DOCKER_RUN_TAG}:${pkg_version} and ${DOCKER_RUN_TAG}:latest"
 }
