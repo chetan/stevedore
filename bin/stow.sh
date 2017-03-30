@@ -269,9 +269,13 @@ version_num_for() {
 # Collect all dependencies for the requested package
 base_pkgs() {
   local BUILD_PKGS="$@"
+  touch /tmp/_all_deps
   for p in $BUILD_PKGS; do
     hab pkg install $p >/dev/null
-    cat $(hab pkg path $p)/DEPS >> /tmp/_all_deps
+    if [[ -f $(hab pkg path $p)/DEPS ]]; then
+      # DEPS file will be missing if the pkg has no deps
+      cat $(hab pkg path $p)/DEPS >> /tmp/_all_deps
+    fi
   done
   (cat /tmp/_all_deps | sort | uniq) && rm -f /tmp/_all_deps
 }
@@ -287,7 +291,6 @@ docker_image_exists() {
   fi
   return 1
 }
-
 docker_hab_image() {
   local _l=">> hab base image (hab only)"
   if docker_image_exists $DOCKER_HAB_TAG; then
@@ -322,7 +325,7 @@ docker_base_image() {
   local _l=">> app deps image"
   if docker_image_exists $DOCKER_BASE_TAG; then
     echo "$_l: $DOCKER_BASE_TAG already built; skipping rebuild"
-    return 0;
+    return 0
   fi
 
   if docker_image_exists $DOCKER_BASE_TAG_ALT; then
@@ -330,14 +333,22 @@ docker_base_image() {
     # create a tag alias for our package
     docker tag $DOCKER_BASE_TAG_ALT $DOCKER_BASE_TAG
     DOCKER_BASE_TAG="$DOCKER_BASE_TAG_ALT"
-    return 0;
+    return 0
+  fi
+
+  if [[ "$(echo -n $BASE_PKGS | wc -l)" == "0" ]]; then
+    # There are no BASE_PKGS so simply retag the hab_base
+    echo "$_l: no deps, skipping build (just tagging)"
+    docker tag $DOCKER_HAB_TAG $DOCKER_BASE_TAG
+    docker tag $DOCKER_BASE_TAG $DOCKER_BASE_TAG_ALT
+    return 0
   fi
 
   echo "$_l: building..."
 
   mv /hab/cache/artifacts/* $DOCKER_CONTEXT/
   mkdir -p $DOCKER_CONTEXT/keys && cp -a /hab/cache/keys/* $DOCKER_CONTEXT/keys/
-  local _base_pkgs=$(echo $BASE_PKGS | tr '\n' ' ')
+  local _base_pkgs=$(echo -n $BASE_PKGS | tr '\n' ' ')
 
   # create base image Dockerfile
   cat <<EOT > $DOCKER_CONTEXT/Dockerfile
