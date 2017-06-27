@@ -42,7 +42,7 @@ fi
 # parse the CLI flags and options
 parse_options() {
 
-  if [[ -z "$@" ]]; then
+  if [[ -z "$*" ]]; then
     # no args given, bail out
     print_help
     exit_with "You must specify one or more Habitat packages to Dockerize." 1
@@ -175,7 +175,8 @@ add_trailing_slash() {
 # clean directory with native filesystem permissions which is outside the
 # source code tree.
 build_docker_image() {
-  local ident_file="$(hab pkg path $PKG)/IDENT"
+  local ident_file
+  ident_file="$(hab pkg path $PKG)/IDENT"
   if [[ ! -f "$ident_file" ]]; then
     hab pkg install $PKG # try to install it
     ident_file="$(hab pkg path $PKG)/IDENT"
@@ -251,12 +252,13 @@ package_ident_for() {
 
 package_name_for() {
   local pkg="$1"
-  echo $(echo $pkg | cut -d "/" -f 2)
+  echo "$(echo $pkg | cut -d "/" -f 2)"
 }
 
 package_exposes() {
   local pkg="$1"
-  local expose_file="$(hab pkg path $pkg)/EXPOSES"
+  local expose_file
+  expose_file="$(hab pkg path $pkg)/EXPOSES"
   if [ -f "$expose_file" ]; then
     cat $expose_file
   fi
@@ -269,13 +271,13 @@ version_num_for() {
 
 # Collect all dependencies for the requested package
 base_pkgs() {
-  local BUILD_PKGS="$@"
+  local BUILD_PKGS=( "$@" )
   touch /tmp/_all_deps
-  for p in $BUILD_PKGS; do
+  for p in "${BUILD_PKGS[@]}"; do
     hab pkg install $p >/dev/null
     if [[ -f $(hab pkg path $p)/DEPS ]]; then
       # DEPS file will be missing if the pkg has no deps
-      cat $(hab pkg path $p)/DEPS >> /tmp/_all_deps
+      cat "$(hab pkg path $p)"/DEPS >> /tmp/_all_deps
     fi
   done
   (cat /tmp/_all_deps | sort | uniq) && rm -f /tmp/_all_deps
@@ -337,7 +339,7 @@ docker_base_image() {
     return 0
   fi
 
-  if [[ "$(echo $BASE_PKGS | tr ' ' \"\n\" | wc -l)" == "0" ]]; then
+  if [[ "$(echo $BASE_PKGS | tr ' ' "\n" | wc -l)" == "0" ]]; then
     # There are no BASE_PKGS so simply retag the hab_base
     echo "$_l: no deps, skipping build (just tagging)"
     docker tag $DOCKER_HAB_TAG $DOCKER_BASE_TAG
@@ -349,7 +351,8 @@ docker_base_image() {
 
   cp /hab/cache/artifacts/* $DOCKER_CONTEXT/
   mkdir -p $DOCKER_CONTEXT/keys && cp -a /hab/cache/keys/* $DOCKER_CONTEXT/keys/
-  local _base_pkgs=$(echo -n $BASE_PKGS | tr '\n' ' ')
+  local _base_pkgs
+  _base_pkgs=$(echo -n $BASE_PKGS | tr '\n' ' ')
 
   # create base image Dockerfile
   cat <<EOT > $DOCKER_CONTEXT/Dockerfile
@@ -377,7 +380,8 @@ EOT
 docker_image() {
   echo ">> app image: building..."
 
-  local pkg_file=$(ls /hab/cache/artifacts/$(cat $(hab pkg path $pkg_ident)/IDENT | tr '/' '-')-*)
+  local pkg_file
+  pkg_file=$(ls /hab/cache/artifacts/"$(cat "$(hab pkg path $pkg_ident)"/IDENT | tr '/' '-')"-*)
   cp $pkg_file $DOCKER_CONTEXT/
   # make sure all local keys are available during docker build
   mkdir -p $DOCKER_CONTEXT/keys && cp -a /hab/cache/keys/* $DOCKER_CONTEXT/keys/
@@ -464,7 +468,7 @@ program=$(basename $0)
 
 find_system_commands
 
-parse_options $@
+parse_options "$@"
 trap 'cleanup_and_exit $?' INT TERM HUP EXIT
 build_docker_image
 push_docker_image
