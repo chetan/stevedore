@@ -339,7 +339,7 @@ docker_base_image() {
     return 0
   fi
 
-  if [[ "$(echo $BASE_PKGS | tr ' ' "\n" | wc -l)" == "0" ]]; then
+  if [[ -z "$BASE_PKGS" || "$(echo $BASE_PKGS | tr ' ' "\n" | wc -l)" == "0" ]]; then
     # There are no BASE_PKGS so simply retag the hab_base
     echo "$_l: no deps, skipping build (just tagging)"
     docker tag $DOCKER_HAB_TAG $DOCKER_BASE_TAG
